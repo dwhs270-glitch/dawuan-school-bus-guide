@@ -12,7 +12,7 @@ function inRegion(p){return Number.isFinite(p.lat)&&Number.isFinite(p.lon)&&p.la
 function normalize(s){return String(s).normalize('NFKC').replace(/台/g,'臺').replace(/傢/g,'家').replace(/[\s，,、（）()\-]/g,'').toLowerCase()}
 function early(t){const [h,m]=t.split(':').map(Number),v=h*60+m-5;return String(Math.floor(v/60)).padStart(2,'0')+':'+String(v%60).padStart(2,'0')}
 function setStatus(s){$('status').textContent=s}
-function setBusy(b){busy=b;$('searchButton').disabled=b;$('searchButton').textContent=b?'正在比較地圖位置…':'定位地址並比較附近站點';document.querySelectorAll('[data-route],[data-query],#clear,#district,#radius,#provider').forEach(el=>el.disabled=b)}
+function setBusy(b){busy=b;$('searchButton').disabled=b;$('searchButton').textContent=b?'正在比較地圖位置…':'確認';document.querySelectorAll('[data-route],[data-query],#clear,#district,#radius,#provider').forEach(el=>el.disabled=b)}
 async function geocode(q,streetFallback=false){
  const elapsed=Date.now()-lastRequest;if(elapsed<1150)await delay(1150-elapsed);lastRequest=Date.now();
  const provider=$('provider').value;const url=new URL(provider==='nominatim'?'https://nominatim.openstreetmap.org/search':'https://photon.komoot.io/api/');
@@ -48,7 +48,7 @@ async function locateStations(){
 
 function ensureMap(){
  if(map)return true;if(!window.L){$('mapUnavailable').hidden=false;return false}
- map=L.map('geoMap').setView([23,120.25],12);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);layers=L.layerGroup().addTo(map);map.on('click',e=>{if(!busy)confirmOrigin({lat:e.latlng.lat,lon:e.latlng.lng,label:'地圖選取位置（'+e.latlng.lat.toFixed(6)+', '+e.latlng.lng.toFixed(6)+'）'})});
+ map=L.map('geoMap').setView([23,120.25],12);L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);layers=L.layerGroup().addTo(map);map.on('click',e=>{if(!busy)showOriginChoices([{lat:e.latlng.lat,lon:e.latlng.lng,label:'地圖選取位置（'+e.latlng.lat.toFixed(6)+', '+e.latlng.lng.toFixed(6)+'）',precise:true}])});
  let tileErrors=0;map.eachLayer(layer=>{if(layer.on&&layer._url)layer.on('tileerror',()=>{tileErrors++;if(tileErrors===3)$('mapUnavailable').hidden=false})});
  return true;
 }
@@ -60,12 +60,12 @@ function drawMap(stops){
 }
 function formatDistance(m){return m<1000?Math.round(m)+' 公尺':(m/1000).toFixed(2)+' 公里'}
 function walkingURL(s){return 'https://www.google.com/maps/dir/?api=1&origin='+origin.lat+','+origin.lon+'&destination='+s.lat+','+s.lon+'&travelmode=walking'}
-function stationHTML(s,index){const nearby=origin&&s.distance!==undefined;return '<article class="stop"><div><div class="time">'+s.time+'</div><div class="arrive-early">'+early(s.time)+' 前到站</div></div><div><div class="station">'+(nearby?(index+1)+'. ':'')+escapeHTML(s.name)+'</div>'+(nearby?'<div class="distance-badge">'+s.route+' 線 · 直線距離 '+formatDistance(s.distance)+'</div>':'')+'<div class="address">'+escapeHTML(s.address)+'</div>'+(nearby?'<div class="small">地標核對：'+escapeHTML(s.geoLabel)+'（請核對實際候車側）</div>':'')+(s.note?'<div class="note">'+escapeHTML(s.note)+'</div>':'')+'<div class="stop-bottom"><span class="fare">單趟參考 '+s.fare+' 元 · '+s.km+' 公里</span><a class="map" target="_blank" rel="noopener noreferrer" href="'+(nearby?'https://www.google.com/maps/search/?api=1&query='+s.lat+','+s.lon:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(s.address+' '+s.name))+'">查看上車位置</a>'+(nearby?'<a class="map" target="_blank" rel="noopener noreferrer" href="'+walkingURL(s)+'">查看實際步行路線 ↗</a>':'')+'</div></div></article>'}
+function stationHTML(s,index){const nearby=origin&&s.distance!==undefined;const station=verifiedLocations.find(p=>p.key===s.key);return '<article class="stop"><div><div class="time">'+s.time+'</div><div class="arrive-early">'+early(s.time)+' 前到站</div></div><div><div class="station">'+(nearby?(index+1)+'. ':'')+escapeHTML(s.name)+'</div>'+(nearby?'<div class="distance-badge">'+s.route+' 線 · 直線距離 '+formatDistance(s.distance)+'</div>':'')+'<div class="address">'+escapeHTML(s.address)+'</div>'+(nearby?'<div class="small">地標核對：'+escapeHTML(s.geoLabel)+'（請核對實際候車側）</div>':'')+(s.note?'<div class="note">'+escapeHTML(s.note)+'</div>':'')+'<div class="stop-bottom"><span class="fare">單趟參考 '+s.fare+' 元 · '+s.km+' 公里</span><a class="map" target="_blank" rel="noopener noreferrer" href="'+(station?'https://www.google.com/maps/search/?api=1&query='+station.lat+','+station.lon:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(s.address+' '+s.name))+'">查看上車位置</a>'+(nearby?'<a class="map" target="_blank" rel="noopener noreferrer" href="'+walkingURL(s)+'">查看實際步行路線 ↗</a>':'')+'</div></div></article>'}
 function renderBrowse(){
  const district=$('district').value;const available=routes.filter(r=>chosen==='all'||r.id===chosen).map(r=>({...r,stops:r.stops.filter(s=>!district||s.address.includes(district))})).filter(r=>r.stops.length);
  $('count').textContent=available.reduce((n,r)=>n+r.stops.length,0)+' 站';$('resultTitle').textContent=chosen==='all'?'校車站點一覽':chosen+' 線上車站點';
  $('results').innerHTML=available.map(r=>'<section class="route-block"><div class="route-header '+(r.id==='B'?'b':'')+'"><h3>'+r.id+' 線 · '+r.area+'</h3><span>到校 '+r.arrival+'</span></div>'+r.stops.map((s,i)=>stationHTML(s,i)).join('')+'</section>').join('')||'<div class="empty">此路線沒有符合行政區的站點。請清除篩選條件。</div>';
- setStatus('輸入完整地址並按定位按鈕，確認地圖位置後，以座標距離比較附近站點。行政區選單只用於瀏覽站點。');
+ setStatus('輸入完整地址並按「確認」，確認地圖位置後，以座標距離比較附近站點。行政區選單只用於瀏覽站點。');
 }
 function renderNearby(){
  const radius=Number($('radius').value),district=$('district').value;
@@ -84,22 +84,43 @@ async function confirmOrigin(p){
  if(busy)return;setBusy(true);origin=p;$('originCandidates').innerHTML='';$('originLabel').textContent='已選出發位置：'+p.label+(p.precise===false?'（定位為路段／較廣泛位置，請在地圖點選實際位置）':'');$('originLabel').hidden=false;$('mapPanel').hidden=false;drawMap([]);
  try{await locateStations();render();if(!located.length)setStatus('尚未取得可核對的站點座標，無法提供距離建議。請切換定位服務後重試；你也可查看完整時刻表。');$('resultTitle').scrollIntoView({behavior:'smooth',block:'start'})}catch(e){setStatus('地圖比較失敗，請稍後重試。'+e.message)}finally{setBusy(false)}
 }
+
+function knownOriginCandidates(q){
+ const clean=s=>normalize(s).replace(/臺灣/g,'').replace(/(?:^|[^0-9])\d{3}(?=臺南市|高雄市)/g,'').replace(/1樓$/,'');
+ const input=clean(q);if(!input)return [];
+ const short=s=>s.replace(/^(臺南市|高雄市)/,'');
+ const names={'A-6':['南大附中','國立臺南大學附屬高級中學'], 'B-3':['德南國小','臺南市仁德區德南國民小學'], 'B-5':['第一分局','德高派出所'], 'B-9':['我家牛排','我家牛排後甲店','臺南市東區裕農路578號'], 'B-10':['裕文國小','臺南市東區裕文路301號']};
+ return allStops.filter(s=>{
+  const p=verifiedLocations.find(v=>v.key===s.key);if(!p)return false;
+  const aliases=[s.name,s.name.replace(/（.*?）/g,''),s.address,s.address.replace(/1樓$/,''),...(names[s.key]||[])];
+  return aliases.some(a=>[clean(a),clean(short(a)),clean('臺南市'+a),clean('高雄市'+a)].includes(input));
+ }).map(s=>{const p=verifiedLocations.find(v=>v.key===s.key);return {lat:p.lat,lon:p.lon,label:p.label,name:s.name,precise:true,approximate:!!p.approximate,source:'verified-station',stationKey:s.key}});
+}
+function clearOrigin(){
+ origin=null;located=[];$('originCandidates').innerHTML='';$('originLabel').hidden=true;$('mapPanel').hidden=true;$('coverage').hidden=true;
+ if(layers)layers.clearLayers();$('transitLink').href='https://www.google.com/maps/dir/?api=1&destination='+encodeURIComponent('臺南市立大灣高級中學')+'&travelmode=transit';
+}
+function showOriginChoices(candidates){
+ $('originCandidates').innerHTML='<p><strong>請確認你的出發位置</strong></p>'+candidates.map((p,i)=>'<button type="button" class="location-choice" data-origin="'+i+'">'+escapeHTML(p.label)+'<span>'+(p.source==='verified-station'?'本站已核對的站點地標；請確認實際出發點及候車側':p.precise?'門牌／地標位置':'較廣泛的位置，請核對並在地圖微調')+'</span></button>').join('');
+ $('originCandidates').querySelectorAll('[data-origin]').forEach(b=>b.onclick=()=>confirmOrigin(candidates[Number(b.dataset.origin)]));
+ setStatus('請選擇正確的出發位置，選定後自動比較附近校車站點。');
+}
 async function searchAddress(){
  if(busy)return;const q=$('query').value.trim();if(!q){setStatus('請先輸入完整地址或附近明確地標。');$('query').focus();return}
- origin=null;$('originLabel').hidden=true;$('mapPanel').hidden=true;$('coverage').hidden=true;$('results').innerHTML='';$('count').textContent='—';$('originCandidates').innerHTML='';setBusy(true);setStatus('正在將地址轉成地圖座標，請稍候…');
- try{const candidates=await geocode(q);if(!candidates.length){setStatus('地圖服務未找到這個地址。請補上縣市、行政區與門牌，或輸入附近明確地標；也可按「在地圖選出發位置」直接點選位置。');return}
- $('originCandidates').innerHTML='<p><strong>請確認你的出發位置</strong></p>'+candidates.map((p,i)=>'<button type="button" class="location-choice" data-origin="'+i+'">'+escapeHTML(p.label)+'<span>'+(p.precise?'門牌／地標位置':'較廣泛的位置，請核對是否適合作為出發點')+'</span></button>').join('');
- $('originCandidates').querySelectorAll('[data-origin]').forEach(b=>b.onclick=()=>confirmOrigin(candidates[Number(b.dataset.origin)]));setStatus('已取得地圖位置。請在上方選擇符合的地址，再比較校車站點。');
+ clearOrigin();$('results').innerHTML='';$('count').textContent='—';setBusy(true);setStatus('正在將地址轉成地圖座標，請稍候…');
+ try{const known=knownOriginCandidates(q);const candidates=known.length?known:await geocode(q);if($('query').value.trim()!==q){setStatus('地址已變更，請按「確認」重新查詢。');return}if(!candidates.length){setStatus('地圖服務未找到這個地址。請補上縣市、行政區與門牌，或輸入附近明確地標；請確認地址拼字，或改用附近明確地標。');return}
+ showOriginChoices(candidates);
  }catch(e){setStatus('地址定位暫時無法連線。請切換下方定位服務後再試。'+(e.name==='AbortError'?'（連線逾時）':'（'+e.message+'）'))}finally{setBusy(false)}
 }
-function reset(){if(busy)return;origin=null;chosen='all';$('query').value='';$('district').value='';$('originCandidates').innerHTML='';$('originLabel').hidden=true;$('mapPanel').hidden=true;$('coverage').hidden=true;render()}
+function reset(){if(busy)return;clearOrigin();chosen='all';$('query').value='';$('district').value='';render()}
+$('query').addEventListener('input',()=>{clearOrigin();if(!busy)render();setStatus('地址已變更，請按「確認」選擇出發位置。')});
 $('searchForm').onsubmit=e=>{e.preventDefault();searchAddress()};
-$('pickMap').onclick=()=>{if(busy)return;$('mapPanel').hidden=false;ensureMap();setTimeout(()=>map&&map.invalidateSize(),50);setStatus('請放大地圖並點選你的實際出發位置，即可比較附近站點。');$('mapPanel').scrollIntoView({behavior:'smooth',block:'start'})};
 $('district').onchange=render;$('radius').onchange=()=>{if(origin)renderNearby()};
-$('provider').onchange=()=>{origin=null;located=[];$('originCandidates').innerHTML='';$('originLabel').hidden=true;$('mapPanel').hidden=true;$('coverage').hidden=true;render()};
+$('provider').onchange=()=>{clearOrigin();render()};
 document.querySelectorAll('[data-route]').forEach(b=>b.onclick=()=>{chosen=b.dataset.route;render()});
-document.querySelectorAll('[data-query]').forEach(b=>b.onclick=()=>{$('query').value='臺南市'+b.dataset.query;setStatus('已填入範例。請補上完整地址後按定位按鈕。');$('query').focus()});
+document.querySelectorAll('[data-query]').forEach(b=>b.onclick=()=>{clearOrigin();$('query').value='臺南市'+b.dataset.query;render();setStatus('已填入範例。請補上完整地址後按「確認」。');$('query').focus()});
 $('clear').onclick=reset;
 document.querySelectorAll('.originals img').forEach(img=>{img.dataset.src=img.getAttribute('src');img.removeAttribute('src')});
 $('sourceDetails').addEventListener('toggle',function(){if(this.open)this.querySelectorAll('img[data-src]').forEach(img=>{img.src=img.dataset.src;delete img.dataset.src})});
 render();
+
